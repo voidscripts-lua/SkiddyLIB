@@ -1,8 +1,8 @@
 -- made by Noob --
--- lang: Luau, file: SkiddyLIB.lua, target: Roblox Executor (Synapse/KRNL/Delta etc.)
--- SkiddyLIB — full UI library, all Skiddy tbl8.* + background/texture/icon image system
+-- lang: Luau, file: SkiddyLib.lua, target: Roblox Executor (Synapse/KRNL/Delta etc.)
+-- SkiddyLib — full UI library, all Skiddy tbl8.* + background/texture/icon image system
 --
--- Image loading order per Hasset:
+-- Image loading order per asset:
 --   1. writefile cache  (SkiddyHub/<name>)
 --   2. postimg CDN      (tbl_postimg)
 --   3. roblox asset CDN (tbl_rbx)
@@ -193,7 +193,12 @@ local function gradient(p, c1, c2, rot)
 end
 
 local function tween(obj, t, props)
-    TweenService:Create(obj, TweenInfo.new(t), props):Play()
+    local info = TweenInfo.new(
+        t,
+        Enum.EasingStyle.Quint,
+        Enum.EasingDirection.Out
+    )
+    TweenService:Create(obj, info, props):Play()
 end
 
 local function notify(title, text, dur)
@@ -204,17 +209,17 @@ local function notify(title, text, dur)
     end)
 end
 
--- ── SkiddyLIB ────────────────────────────────────────────────────────────────────
+-- ── SkiddyLib ────────────────────────────────────────────────────────────────────
 
-local SkiddyLIB   = {}
-SkiddyLIB.Flags   = {}
-SkiddyLIB.__index = SkiddyLIB
+local SkiddyLib   = {}
+SkiddyLib.Flags   = {}
+SkiddyLib.__index = SkiddyLib
 
 -- ── MakeWindow ────────────────────────────────────────────────────────────────
 
-function SkiddyLIB:MakeWindow(cfg)
+function SkiddyLib:MakeWindow(cfg)
     cfg = cfg or {}
-    local winName       = cfg.Name           or "SkiddyLIB"
+    local winName       = cfg.Name           or "SkiddyLib"
     local closeCallback = cfg.CloseCallback
 
     -- root
@@ -248,10 +253,11 @@ function SkiddyLIB:MakeWindow(cfg)
     bgLayer.Name               = rnd()
     bgLayer.Size               = UDim2.new(1, -10, 1, -8)
     bgLayer.Position           = UDim2.new(0, 5, 0, 4)
-    bgLayer.BackgroundColor3   = Color3.fromRGB(0, 0, 0)
+    bgLayer.BackgroundColor3   = cfg.BackgroundColor or Color3.fromRGB(0, 0, 0)
+    bgLayer.BackgroundTransparency = cfg.BackgroundImage and 0 or 0
     bgLayer.BorderSizePixel    = 0
-    bgLayer.Image              = ""          -- filled async below
-    bgLayer.ImageTransparency  = 0.4
+    bgLayer.Image              = cfg.BackgroundImage or "" -- custom image supported
+    bgLayer.ImageTransparency  = cfg.BackgroundImageTransparency or 0.4
     bgLayer.ScaleType          = Enum.ScaleType.Crop
     corner(bgLayer, UDim.new(0, 14))
 
@@ -260,12 +266,18 @@ function SkiddyLIB:MakeWindow(cfg)
         Color3.fromRGB(28, 28, 36),
         Color3.fromRGB(14, 14, 20), 60)
 
-    -- load bg image async; destroy gradient once loaded (mirrors Skiddy func12 bg)
-    applyImageAsync("bg", function(url)
-        bgLayer.Image = url
-        bgLayer.BackgroundTransparency = 0
-        if bgGrad and bgGrad.Parent then bgGrad:Destroy() end
-    end)
+    -- Load the default image only when no custom image was supplied.
+    if not cfg.BackgroundImage then
+        applyImageAsync("bg", function(url)
+            if bgLayer and bgLayer.Parent and not cfg.BackgroundImage then
+                bgLayer.Image = url
+                bgLayer.BackgroundTransparency = 0
+                if bgGrad and bgGrad.Parent then bgGrad:Destroy() end
+            end
+        end)
+    elseif bgGrad and bgGrad.Parent then
+        bgGrad:Destroy()
+    end
 
     -- title bar row
     local titleRow = Instance.new("Frame", bgLayer)
@@ -416,20 +428,60 @@ function SkiddyLIB:MakeWindow(cfg)
     end)
 
     -- tab state
-    local pages   = {}
-    local tabBtns = {}
-    local active  = nil
+    local pages      = {}
+    local tabBtns    = {}   -- name → { btn, indicator, nameLbl, icoLbl }
+    local pageCount  = 0
+    local active     = nil
 
+    -- Soft page transitions + animated active-tab indicator.
     local function activatePage(name)
-        for k, page in pairs(pages) do
-            page.Visible = k == name
+        if active == name then return end
+
+        local previous = active
+        if previous and tabBtns[previous] then
+            local old = tabBtns[previous]
+            tween(old.btn, 0.24, {BackgroundTransparency = 1})
+            tween(old.indicator, 0.24, {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 3, 0, 0)
+            })
+            tween(old.nameLbl, 0.22, {
+                TextColor3 = Color3.fromRGB(180, 180, 190),
+                TextTransparency = 0.18
+            })
+            if old.icoLbl then
+                tween(old.icoLbl, 0.22, {ImageTransparency = 0.38})
+            end
         end
-        if active and tabBtns[active] then
-            tween(tabBtns[active], 0.2, {BackgroundTransparency = 1})
+
+        for pageName, pageObject in pairs(pages) do
+            if pageName ~= name then
+                pageObject.Visible = false
+            end
         end
+
         active = name
-        if tabBtns[name] then
-            tween(tabBtns[name], 0.2, {BackgroundTransparency = 0.75})
+        local currentPage = pages[name]
+        if currentPage then
+            currentPage.Visible = true
+            currentPage.Position = UDim2.new(0, 13, 0, 0)
+            tween(currentPage, 0.32, {Position = UDim2.new(0, 0, 0, 0)})
+        end
+
+        local cur = tabBtns[name]
+        if cur then
+            tween(cur.btn, 0.26, {BackgroundTransparency = 0.84})
+            tween(cur.indicator, 0.30, {
+                BackgroundTransparency = 0,
+                Size = UDim2.new(0, 3, 0.72, 0)
+            })
+            tween(cur.nameLbl, 0.26, {
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                TextTransparency = 0
+            })
+            if cur.icoLbl then
+                tween(cur.icoLbl, 0.26, {ImageTransparency = 0})
+            end
         end
     end
 
@@ -443,6 +495,27 @@ function SkiddyLIB:MakeWindow(cfg)
 
     function Window:SetIcon(url)
         badgeIcon.Image = url or ""
+    end
+
+    -- Background customization:
+    -- SetBackground(imageUrl, imageTransparency)
+    -- SetBackgroundColor(Color3)
+    -- SetBackgroundTransparency(number)
+    function Window:SetBackground(imageUrl, imageTransparency)
+        cfg.BackgroundImage = imageUrl or ""
+        bgLayer.Image = cfg.BackgroundImage
+        bgLayer.ImageTransparency = math.clamp(imageTransparency or 0.4, 0, 1)
+        if bgGrad and bgGrad.Parent then bgGrad:Destroy() end
+    end
+
+    function Window:SetBackgroundColor(color)
+        if typeof(color) == "Color3" then
+            bgLayer.BackgroundColor3 = color
+        end
+    end
+
+    function Window:SetBackgroundTransparency(value)
+        bgLayer.ImageTransparency = math.clamp(tonumber(value) or 0.4, 0, 1)
     end
 
     function Window:Notify(nCfg)
@@ -471,7 +544,8 @@ function SkiddyLIB:MakeWindow(cfg)
 
     function Window:MakeTab(tabCfg)
         tabCfg = tabCfg or {}
-        local tabName = tabCfg.Name or ("Tab " .. tostring(#pages + 1))
+        pageCount = pageCount + 1
+        local tabName = tabCfg.Name or ("Tab " .. tostring(pageCount))
         local tabIcon = tabCfg.Icon  -- explicit URL; nil = auto-resolve
 
         -- sidebar button
@@ -481,9 +555,20 @@ function SkiddyLIB:MakeWindow(cfg)
         tabBtn.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
         tabBtn.BackgroundTransparency = 1
         tabBtn.Text               = ""
-        tabBtn.LayoutOrder        = #pages + 1
-        corner(tabBtn, UDim.new(0, 6))
-        tabBtns[tabName] = tabBtn
+        tabBtn.LayoutOrder        = pageCount
+        corner(tabBtn, UDim.new(0, 7))
+        stroke(tabBtn, Color3.fromRGB(255, 255, 255), 0.6, 1)
+
+        -- slim accent indicator, revealed for the selected tab
+        local tabIndicator = Instance.new("Frame", tabBtn)
+        tabIndicator.Name = rnd()
+        tabIndicator.Size = UDim2.new(0, 3, 0, 0)
+        tabIndicator.Position = UDim2.new(0, 0, 0.5, 0)
+        tabIndicator.AnchorPoint = Vector2.new(0, 0.5)
+        tabIndicator.BackgroundColor3 = cfg.AccentColor or Color3.fromRGB(135, 115, 255)
+        tabIndicator.BackgroundTransparency = 1
+        tabIndicator.BorderSizePixel = 0
+        corner(tabIndicator, UDim.new(1, 0))
 
         -- icon slot inside button
         local tabIcoLbl = Instance.new("ImageLabel", tabBtn)
@@ -503,6 +588,8 @@ function SkiddyLIB:MakeWindow(cfg)
         tabNameLbl.TextSize          = 10
         tabNameLbl.Font              = Enum.Font.MontserratMedium
         tabNameLbl.TextXAlignment    = Enum.TextXAlignment.Left
+        tabNameLbl.TextColor3        = Color3.fromRGB(180, 180, 190)
+        tabNameLbl.TextTransparency  = 0.18
 
         -- resolve icon: explicit > autoIconMap > nil (no icon)
         if tabIcon and tabIcon ~= "" then
@@ -538,6 +625,25 @@ function SkiddyLIB:MakeWindow(cfg)
         pageList.Padding = UDim.new(0, 6)
         uiPadding(page, 6, 6, 6, 6)
         pages[tabName] = page
+        tabBtns[tabName] = {
+            btn = tabBtn,
+            indicator = tabIndicator,
+            nameLbl = tabNameLbl,
+            icoLbl = tabIcoLbl
+        }
+
+        tabBtn.MouseEnter:Connect(function()
+            if active ~= tabName then
+                tween(tabBtn, 0.16, {BackgroundTransparency = 0.92})
+            end
+        end)
+        tabBtn.MouseLeave:Connect(function()
+            if active ~= tabName then
+                tween(tabBtn, 0.16, {BackgroundTransparency = 1})
+            end
+        end)
+
+        page.Position = UDim2.new(0, 13, 0, 0)
 
         tabBtn.MouseButton1Click:Connect(function()
             activatePage(tabName)
@@ -669,11 +775,11 @@ function SkiddyLIB:MakeWindow(cfg)
                 tween(knob, 0.2, {Position = val
                     and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)})
                 if tCfg.Callback then pcall(tCfg.Callback, val) end
-                if tCfg.Flag then SkiddyLIB.Flags[tCfg.Flag] = {Value = val} end
+                if tCfg.Flag then SkiddyLib.Flags[tCfg.Flag] = {Value = val} end
             end
 
             track.MouseButton1Click:Connect(function() set(not val) end)
-            if tCfg.Flag then SkiddyLIB.Flags[tCfg.Flag] = {Value = val} end
+            if tCfg.Flag then SkiddyLib.Flags[tCfg.Flag] = {Value = val} end
             local obj = {}
             function obj:Set(v) set(v) end
             return obj
@@ -724,7 +830,7 @@ function SkiddyLIB:MakeWindow(cfg)
                 fill.Size = UDim2.new((val - minV) / (maxV - minV), 0, 1, 0)
                 info.Text = fmt(val)
                 if sCfg.Callback then pcall(sCfg.Callback, val) end
-                if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+                if sCfg.Flag then SkiddyLib.Flags[sCfg.Flag] = {Value = val} end
             end
 
             track.InputBegan:Connect(function(inp)
@@ -742,14 +848,14 @@ function SkiddyLIB:MakeWindow(cfg)
                 or inp.UserInputType == Enum.UserInputType.Touch then dragging = false end
             end)
 
-            if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+            if sCfg.Flag then SkiddyLib.Flags[sCfg.Flag] = {Value = val} end
             local obj = {}
             function obj:Set(v)
                 val = math.clamp(v, minV, maxV)
                 fill.Size = UDim2.new((val - minV) / (maxV - minV), 0, 1, 0)
                 info.Text = fmt(val)
                 if sCfg.Callback then pcall(sCfg.Callback, val) end
-                if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+                if sCfg.Flag then SkiddyLib.Flags[sCfg.Flag] = {Value = val} end
             end
             return obj
         end
@@ -855,7 +961,7 @@ function SkiddyLIB:MakeWindow(cfg)
                 val = v
                 lblD.Text = (dCfg.Name or "Dropdown") .. ": " .. tostring(val)
                 if dCfg.Callback then pcall(dCfg.Callback, val) end
-                if dCfg.Flag then SkiddyLIB.Flags[dCfg.Flag] = {Value = val} end
+                if dCfg.Flag then SkiddyLib.Flags[dCfg.Flag] = {Value = val} end
             end
 
             local function buildList()
@@ -891,7 +997,7 @@ function SkiddyLIB:MakeWindow(cfg)
                 wrapper.Size = UDim2.new(1, -6, 0, open and 152 or 28)
             end)
 
-            if dCfg.Flag then SkiddyLIB.Flags[dCfg.Flag] = {Value = val} end
+            if dCfg.Flag then SkiddyLib.Flags[dCfg.Flag] = {Value = val} end
             local obj = {}
             function obj:Set(v) setVal(v) end
             function obj:Refresh(list, clear)
@@ -985,7 +1091,7 @@ function SkiddyLIB:MakeWindow(cfg)
             UserInputService.InputBegan:Connect(function(inp, gp)
                 if listening and inp.UserInputType == Enum.UserInputType.Keyboard then
                     key = inp.KeyCode; keyBtn.Text = key.Name; listening = false
-                    if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+                    if bCfg.Flag then SkiddyLib.Flags[bCfg.Flag] = {Value = key} end
                     return
                 end
                 if gp then return end
@@ -1000,11 +1106,11 @@ function SkiddyLIB:MakeWindow(cfg)
                 end
             end)
 
-            if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+            if bCfg.Flag then SkiddyLib.Flags[bCfg.Flag] = {Value = key} end
             local obj = {}
             function obj:Set(k)
                 key = k; keyBtn.Text = k.Name
-                if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+                if bCfg.Flag then SkiddyLib.Flags[bCfg.Flag] = {Value = key} end
             end
             return obj
         end
@@ -1070,7 +1176,7 @@ function SkiddyLIB:MakeWindow(cfg)
                 rgbLbl.Text = string.format("R:%d G:%d B:%d",
                     math.floor(color.R*255), math.floor(color.G*255), math.floor(color.B*255))
                 if cpCfg.Callback then pcall(cpCfg.Callback, color) end
-                if cpCfg.Flag then SkiddyLIB.Flags[cpCfg.Flag] = {Value = color} end
+                if cpCfg.Flag then SkiddyLib.Flags[cpCfg.Flag] = {Value = color} end
             end
             updateColor()
 
@@ -1106,7 +1212,7 @@ function SkiddyLIB:MakeWindow(cfg)
                 wrapper.Size = UDim2.new(1,-6,0, open and 132 or 28)
             end)
 
-            if cpCfg.Flag then SkiddyLIB.Flags[cpCfg.Flag] = {Value = color} end
+            if cpCfg.Flag then SkiddyLib.Flags[cpCfg.Flag] = {Value = color} end
             local obj = {}
             function obj:Set(c)
                 color = c; h,s,v2 = Color3.toHSV(c); updateColor()
@@ -1122,12 +1228,12 @@ end -- MakeWindow
 
 -- ── global API ────────────────────────────────────────────────────────────────
 
-function SkiddyLIB:MakeNotification(nCfg)
+function SkiddyLib:MakeNotification(nCfg)
     nCfg = nCfg or {}
-    notify(nCfg.Name or nCfg.Title or "SkiddyLIB", nCfg.Content or "", nCfg.Time or 3)
+    notify(nCfg.Name or nCfg.Title or "SkiddyLib", nCfg.Content or "", nCfg.Time or 3)
 end
 
-function SkiddyLIB:Init()    end
-function SkiddyLIB:Destroy() self.Flags = {} end
+function SkiddyLib:Init()    end
+function SkiddyLib:Destroy() self.Flags = {} end
 
-return SkiddyLIB
+return SkiddyLib
