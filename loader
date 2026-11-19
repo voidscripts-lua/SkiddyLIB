@@ -1,0 +1,1185 @@
+-- made by Noob --
+-- lang: Luau, file: SkiddyLIB.lua, target: Roblox Executor (Synapse/KRNL/Delta etc.)
+-- SkiddyLIB — full UI library, all Skiddy tbl8.* components + Orion-compatible API
+--
+-- :MakeWindow(cfg)         → Window
+-- Window:MakeTab(cfg)      → Tab
+-- Window:SetTitle(str)
+-- Window:Notify(cfg)
+-- Tab:AddSection(cfg)      → Section (proxies Tab API)
+-- Tab:AddButton(cfg)
+-- Tab:AddToggle(cfg)       → { Set(v) }
+-- Tab:AddSlider(cfg)       → { Set(v) }
+-- Tab:AddTextbox(cfg)      → { Set(v) }
+-- Tab:AddDropdown(cfg)     → { Set(v), Refresh(list, clear), SetOptions(list) }
+-- Tab:AddLabel(text)       → { Set(text) }
+-- Tab:AddParagraph(t,b)    → { Set(title, body) }
+-- SkiddyLIB:MakeNotification(cfg)
+-- SkiddyLIB:Init()
+-- SkiddyLIB:Destroy()
+-- SkiddyLIB.Flags["flag"]     → { Value }
+
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui          = game:GetService("CoreGui")
+
+local LP = Players.LocalPlayer
+
+-- ── internals ────────────────────────────────────────────────────────────────
+
+local function rnd()
+    local s = ""
+    for _ = 1, 10 do s = s .. string.char(math.random(97, 122)) end
+    return s
+end
+
+local function corner(p, r)
+    local c = Instance.new("UICorner", p)
+    c.CornerRadius = r or UDim.new(0, 8)
+    return c
+end
+
+local function stroke(p, col, thick, trans)
+    local s = Instance.new("UIStroke", p)
+    s.Color       = col   or Color3.fromRGB(255, 255, 255)
+    s.Thickness   = thick or 1
+    s.Transparency= trans or 0.8
+    return s
+end
+
+local function listLayout(p, dir, pad, ha, va)
+    local l = Instance.new("UIListLayout", p)
+    l.SortOrder     = Enum.SortOrder.LayoutOrder
+    l.FillDirection = dir or Enum.FillDirection.Vertical
+    l.Padding       = pad or UDim.new(0, 6)
+    if ha then l.HorizontalAlignment = ha end
+    if va then l.VerticalAlignment   = va end
+    return l
+end
+
+local function uiPadding(p, top, bottom, left, right)
+    local pad = Instance.new("UIPadding", p)
+    pad.PaddingTop    = UDim.new(0, top    or 0)
+    pad.PaddingBottom = UDim.new(0, bottom or 0)
+    pad.PaddingLeft   = UDim.new(0, left   or 0)
+    pad.PaddingRight  = UDim.new(0, right  or 0)
+    return pad
+end
+
+local function gradient(p, c1, c2, rot)
+    local g = Instance.new("UIGradient", p)
+    g.Color    = ColorSequence.new(c1, c2)
+    g.Rotation = rot or 45
+    return g
+end
+
+local function tween(obj, t, props)
+    TweenService:Create(obj, TweenInfo.new(t), props):Play()
+end
+
+local function notify(title, text, dur)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title, Text = text, Duration = dur or 3
+        })
+    end)
+end
+
+-- env probe
+local env = _ENV or {}
+pcall(function()
+    if not env or next(env) == nil then env = getfenv() end
+end)
+local function probe(k) return env[k] end
+local _syn    = probe("syn")
+local _gethui = probe("gethui")
+local _protect= _syn and _syn.protect_gui
+
+-- ── SkiddyLIB ────────────────────────────────────────────────────────────────────
+
+local SkiddyLIB   = {}
+SkiddyLIB.Flags   = {}
+SkiddyLIB.__index = SkiddyLIB
+
+-- ── MakeWindow ────────────────────────────────────────────────────────────────
+
+function SkiddyLIB:MakeWindow(cfg)
+    cfg = cfg or {}
+    local winName       = cfg.Name           or "SkiddyLIB"
+    local closeCallback = cfg.CloseCallback
+
+    -- root
+    local folder = Instance.new("Folder")
+    folder.Name  = rnd()
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name              = rnd()
+    sg.ResetOnSpawn      = false
+    sg.ZIndexBehavior    = Enum.ZIndexBehavior.Sibling
+    sg.DisplayOrder      = 999
+
+    if _protect then pcall(_protect, sg) end
+    folder.Parent = (_gethui and pcall(_gethui) and _gethui()) or CoreGui
+    sg.Parent     = folder
+
+    -- main frame
+    local main = Instance.new("Frame", sg)
+    main.Size                 = UDim2.new(0, 540, 0, 300)
+    main.Position             = UDim2.new(0.5, -270, 0.5, -150)
+    main.BackgroundColor3     = Color3.fromRGB(15, 15, 15)
+    main.BackgroundTransparency = 0.1
+    main.BorderSizePixel      = 0
+    main.Active               = true
+    main.Draggable            = true
+    main.ClipsDescendants     = true
+    corner(main, UDim.new(0, 16))
+
+    -- bg layer
+    local bgLayer = Instance.new("ImageLabel", main)
+    bgLayer.Size               = UDim2.new(1, -10, 1, -8)
+    bgLayer.Position           = UDim2.new(0, 5, 0, 4)
+    bgLayer.BackgroundColor3   = Color3.fromRGB(0, 0, 0)
+    bgLayer.BorderSizePixel    = 0
+    bgLayer.Image              = ""
+    bgLayer.ImageTransparency  = 0.4
+    bgLayer.ScaleType          = Enum.ScaleType.Crop
+    corner(bgLayer, UDim.new(0, 14))
+    local bgGrad = gradient(bgLayer,
+        Color3.fromRGB(28, 28, 36),
+        Color3.fromRGB(14, 14, 20), 60)
+
+    -- title bar row
+    local titleRow = Instance.new("Frame", bgLayer)
+    titleRow.Size               = UDim2.new(1, -20, 0, 32)
+    titleRow.Position           = UDim2.new(0, 10, 0, 8)
+    titleRow.BackgroundTransparency = 1
+    local trList = listLayout(titleRow, Enum.FillDirection.Horizontal, UDim.new(0, 6))
+    trList.VerticalAlignment = Enum.VerticalAlignment.Center
+
+    -- title badge
+    local badge = Instance.new("Frame", titleRow)
+    badge.LayoutOrder            = 1
+    badge.Size                   = UDim2.new(0, 180, 0, 28)
+    badge.BackgroundColor3       = Color3.fromRGB(255, 255, 255)
+    badge.BackgroundTransparency = 0.9
+    corner(badge, UDim.new(0, 8))
+    stroke(badge, Color3.fromRGB(255, 255, 255), 1, 0.8)
+
+    local badgeIcon = Instance.new("ImageLabel", badge)
+    badgeIcon.Size               = UDim2.new(0, 22, 0, 22)
+    badgeIcon.Position           = UDim2.new(0, 6, 0, 3)
+    badgeIcon.BackgroundTransparency = 1
+    badgeIcon.Image              = cfg.Icon or ""
+    if cfg.Icon == nil or cfg.Icon == "" then
+        gradient(badgeIcon,
+            Color3.fromRGB(255, 160, 80),
+            Color3.fromRGB(255, 80, 60))
+    end
+    corner(badgeIcon, UDim.new(1, 0))
+
+    local titleLbl = Instance.new("TextLabel", badge)
+    titleLbl.Size               = UDim2.new(0, 140, 0, 28)
+    titleLbl.Position           = UDim2.new(0, 32, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.RichText           = true
+    titleLbl.Text               = "<b>" .. winName .. "</b>"
+    titleLbl.TextColor3         = Color3.fromRGB(255, 255, 255)
+    titleLbl.TextSize           = 11
+    titleLbl.Font               = Enum.Font.Montserrat
+    titleLbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+    -- controls badge (min + close)
+    local controls = Instance.new("Frame", titleRow)
+    controls.LayoutOrder            = 2
+    controls.Size                   = UDim2.new(0, 65, 0, 28)
+    controls.BackgroundColor3       = Color3.fromRGB(255, 255, 255)
+    controls.BackgroundTransparency = 0.9
+    corner(controls, UDim.new(0, 8))
+    stroke(controls, Color3.fromRGB(255, 255, 255), 1, 0.8)
+    local cList = listLayout(controls, Enum.FillDirection.Horizontal, UDim.new(0, 2))
+    cList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    cList.VerticalAlignment   = Enum.VerticalAlignment.Center
+
+    local btnMin = Instance.new("TextButton", controls)
+    btnMin.LayoutOrder = 1
+    btnMin.Size        = UDim2.new(0, 28, 1, 0)
+    btnMin.BackgroundTransparency = 1
+    btnMin.Text        = "−"
+    btnMin.TextColor3  = Color3.fromRGB(200, 200, 200)
+    btnMin.TextSize    = 18
+    btnMin.Font        = Enum.Font.MontserratBold
+
+    local btnClose = Instance.new("TextButton", controls)
+    btnClose.LayoutOrder = 2
+    btnClose.Size        = UDim2.new(0, 28, 1, 0)
+    btnClose.BackgroundTransparency = 1
+    btnClose.Text        = "×"
+    btnClose.TextColor3  = Color3.fromRGB(255, 80, 80)
+    btnClose.TextSize    = 16
+    btnClose.Font        = Enum.Font.MontserratBold
+
+    -- content area
+    local content = Instance.new("Frame", bgLayer)
+    content.Size               = UDim2.new(1, -20, 1, -50)
+    content.Position           = UDim2.new(0, 10, 0, 44)
+    content.BackgroundTransparency = 1
+    listLayout(content, Enum.FillDirection.Horizontal, UDim.new(0, 8))
+
+    -- sidebar
+    local sidebar = Instance.new("Frame", content)
+    sidebar.LayoutOrder            = 1
+    sidebar.Size                   = UDim2.new(0, 130, 1, 0)
+    sidebar.BackgroundColor3       = Color3.fromRGB(255, 255, 255)
+    sidebar.BackgroundTransparency = 0.9
+    corner(sidebar, UDim.new(0, 8))
+    stroke(sidebar, Color3.fromRGB(255, 255, 255), 1, 0.8)
+
+    local sideScroll = Instance.new("ScrollingFrame", sidebar)
+    sideScroll.Size               = UDim2.new(1, 0, 1, 0)
+    sideScroll.BackgroundTransparency = 1
+    sideScroll.BorderSizePixel    = 0
+    sideScroll.ScrollBarThickness = 2
+    sideScroll.AutomaticCanvasSize= Enum.AutomaticSize.Y
+    sideScroll.CanvasSize         = UDim2.new(0, 0, 0, 0)
+    local sideList = listLayout(sideScroll)
+    sideList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    sideList.Padding = UDim.new(0, 4)
+    uiPadding(sideScroll, 4)
+
+    -- page host
+    local pageHost = Instance.new("Frame", content)
+    pageHost.LayoutOrder            = 2
+    pageHost.Size                   = UDim2.new(1, -138, 1, 0)
+    pageHost.BackgroundColor3       = Color3.fromRGB(255, 255, 255)
+    pageHost.BackgroundTransparency = 0.9
+    pageHost.ClipsDescendants       = true
+    corner(pageHost, UDim.new(0, 8))
+    stroke(pageHost, Color3.fromRGB(255, 255, 255), 1, 0.8)
+
+    -- minimise / close wiring
+    local minimised = false
+    btnMin.MouseButton1Click:Connect(function()
+        if minimised then
+            tween(main, 0.3, {Size = UDim2.new(0, 540, 0, 300)})
+            task.delay(0.15, function() content.Visible = true end)
+        else
+            content.Visible = false
+            tween(main, 0.3, {Size = UDim2.new(0, 540, 0, 48)})
+        end
+        minimised = not minimised
+    end)
+
+    btnClose.MouseButton1Click:Connect(function()
+        main.Visible = false
+        if closeCallback then pcall(closeCallback) end
+    end)
+
+    UserInputService.InputBegan:Connect(function(inp, gp)
+        if gp then return end
+        if inp.KeyCode == Enum.KeyCode.RightShift then
+            main.Visible = not main.Visible
+        end
+    end)
+
+    -- tab state
+    local pages   = {}
+    local tabBtns = {}
+    local active  = nil
+
+    local function activatePage(name)
+        for k, page in pairs(pages) do
+            page.Visible = k == name
+        end
+        if active and tabBtns[active] then
+            tween(tabBtns[active], 0.2, {BackgroundTransparency = 1})
+        end
+        active = name
+        if tabBtns[name] then
+            tween(tabBtns[name], 0.2, {BackgroundTransparency = 0.75})
+        end
+    end
+
+    -- ── Window object ──────────────────────────────────────────────────────
+
+    local Window = {}
+
+    -- SetTitle — runtime window name change
+    function Window:SetTitle(str)
+        titleLbl.Text = "<b>" .. (str or "") .. "</b>"
+    end
+
+    -- SetIcon — swap the badge icon at runtime
+    function Window:SetIcon(url)
+        badgeIcon.Image = url or ""
+    end
+
+    -- Notify
+    function Window:Notify(nCfg)
+        nCfg = nCfg or {}
+        notify(nCfg.Name or nCfg.Title or winName, nCfg.Content or "", nCfg.Time or 3)
+    end
+
+    -- Toggle visibility
+    function Window:Toggle()
+        main.Visible = not main.Visible
+    end
+
+    -- ── MakeTab ────────────────────────────────────────────────────────────
+
+    function Window:MakeTab(tabCfg)
+        tabCfg = tabCfg or {}
+        local tabName = tabCfg.Name or ("Tab " .. tostring(#pages + 1))
+        local tabIcon = tabCfg.Icon or ""
+
+        -- sidebar button
+        local tabBtn = Instance.new("TextButton", sideScroll)
+        tabBtn.Name               = rnd()
+        tabBtn.Size               = UDim2.new(0, 120, 0, tabIcon ~= "" and 32 or 24)
+        tabBtn.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
+        tabBtn.BackgroundTransparency = 1
+        tabBtn.Text               = ""
+        tabBtn.LayoutOrder        = #pages + 1
+        corner(tabBtn, UDim.new(0, 6))
+        tabBtns[tabName] = tabBtn
+
+        -- optional icon inside button
+        if tabIcon ~= "" then
+            local ico = Instance.new("ImageLabel", tabBtn)
+            ico.Size               = UDim2.new(0, 16, 0, 16)
+            ico.Position           = UDim2.new(0, 6, 0.5, -8)
+            ico.BackgroundTransparency = 1
+            ico.Image              = tabIcon
+            local icoLbl = Instance.new("TextLabel", tabBtn)
+            icoLbl.Size            = UDim2.new(0, 90, 1, 0)
+            icoLbl.Position        = UDim2.new(0, 28, 0, 0)
+            icoLbl.BackgroundTransparency = 1
+            icoLbl.Text            = tabName
+            icoLbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            icoLbl.TextSize        = 10
+            icoLbl.Font            = Enum.Font.MontserratMedium
+            icoLbl.TextXAlignment  = Enum.TextXAlignment.Left
+        else
+            local icoLbl = Instance.new("TextLabel", tabBtn)
+            icoLbl.Size            = UDim2.new(1, -8, 1, 0)
+            icoLbl.Position        = UDim2.new(0, 4, 0, 0)
+            icoLbl.BackgroundTransparency = 1
+            icoLbl.Text            = tabName
+            icoLbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            icoLbl.TextSize        = 10
+            icoLbl.Font            = Enum.Font.MontserratMedium
+            icoLbl.TextXAlignment  = Enum.TextXAlignment.Center
+        end
+
+        -- scrollable page
+        local page = Instance.new("ScrollingFrame", pageHost)
+        page.Name                  = rnd()
+        page.Size                  = UDim2.new(1, 0, 1, 0)
+        page.BackgroundTransparency= 1
+        page.BorderSizePixel       = 0
+        page.ScrollBarThickness    = 3
+        page.AutomaticCanvasSize   = Enum.AutomaticSize.Y
+        page.CanvasSize            = UDim2.new(0, 0, 0, 0)
+        page.Visible               = false
+        local pageList = listLayout(page)
+        pageList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        pageList.Padding = UDim.new(0, 6)
+        uiPadding(page, 6, 6, 6, 6)
+        pages[tabName] = page
+
+        tabBtn.MouseButton1Click:Connect(function()
+            activatePage(tabName)
+        end)
+
+        if not active then activatePage(tabName) end
+
+        -- ── layout order counter ───────────────────────────────────────────
+
+        local order = 0
+        local function nextOrder() order = order + 1 return order end
+
+        -- ── shared frame factory ──────────────────────────────────────────
+
+        local function baseFrame(h, parent)
+            local f = Instance.new("Frame", parent or page)
+            f.Name               = rnd()
+            f.Size               = UDim2.new(1, -6, 0, h)
+            f.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
+            f.BackgroundTransparency = 0.9
+            f.LayoutOrder        = nextOrder()
+            corner(f, UDim.new(0, 6))
+            return f
+        end
+
+        -- ── Tab object ────────────────────────────────────────────────────
+
+        local Tab = {}
+
+        -- ── AddSection ────────────────────────────────────────────────────
+        -- tbl8.S equivalent
+        function Tab:AddSection(sCfg)
+            sCfg = sCfg or {}
+            local f = Instance.new("Frame", page)
+            f.Name               = rnd()
+            f.Size               = UDim2.new(1, -6, 0, 32)
+            f.BackgroundColor3   = Color3.fromRGB(50, 50, 50)
+            f.BackgroundTransparency = 0.2
+            f.LayoutOrder        = nextOrder()
+            corner(f, UDim.new(0, 8))
+
+            -- subtle texture bg
+            local texBg = Instance.new("ImageLabel", f)
+            texBg.Size               = UDim2.new(1, 0, 1, 0)
+            texBg.BackgroundTransparency = 1
+            texBg.Image              = ""
+            texBg.ImageTransparency  = 0.45
+            texBg.ImageColor3        = Color3.fromRGB(180, 180, 180)
+            texBg.ScaleType          = Enum.ScaleType.Crop
+            corner(texBg, UDim.new(0, 8))
+
+            local lbl = Instance.new("TextLabel", f)
+            lbl.Size            = UDim2.new(1, 0, 1, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text            = "── " .. (sCfg.Name or "Section") .. " ──"
+            lbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize        = 11
+            lbl.Font            = Enum.Font.MontserratBold
+
+            -- Section proxies all Tab:Add* back to this tab's page
+            local Section = {}
+            setmetatable(Section, {__index = Tab})
+            return Section
+        end
+
+        -- ── AddButton ─────────────────────────────────────────────────────
+        -- tbl8.B equivalent
+        function Tab:AddButton(bCfg)
+            bCfg = bCfg or {}
+            local btn = Instance.new("TextButton", page)
+            btn.Name               = rnd()
+            btn.Size               = UDim2.new(1, -6, 0, 28)
+            btn.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
+            btn.BackgroundTransparency = 0.88
+            btn.Text               = bCfg.Name or "Button"
+            btn.TextColor3         = Color3.fromRGB(255, 255, 255)
+            btn.TextSize           = 10
+            btn.Font               = Enum.Font.MontserratBold
+            btn.LayoutOrder        = nextOrder()
+            corner(btn, UDim.new(0, 6))
+            local st = stroke(btn, Color3.fromRGB(255, 255, 255), 0.5, 0.85)
+
+            -- hover tween
+            btn.MouseEnter:Connect(function()
+                tween(btn, 0.15, {BackgroundTransparency = 0.75})
+            end)
+            btn.MouseLeave:Connect(function()
+                tween(btn, 0.15, {BackgroundTransparency = 0.88})
+            end)
+            btn.MouseButton1Click:Connect(function()
+                if bCfg.Callback then pcall(bCfg.Callback) end
+            end)
+        end
+
+        -- ── AddToggle ─────────────────────────────────────────────────────
+        -- tbl8.T equivalent
+        function Tab:AddToggle(tCfg)
+            tCfg = tCfg or {}
+            local val = tCfg.Default or false
+            local f   = baseFrame(28)
+
+            local lbl = Instance.new("TextLabel", f)
+            lbl.Size            = UDim2.new(0, 200, 1, 0)
+            lbl.Position        = UDim2.new(0, 8, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text            = tCfg.Name or "Toggle"
+            lbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize        = 10
+            lbl.Font            = Enum.Font.Montserrat
+            lbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+            local track = Instance.new("TextButton", f)
+            track.Size          = UDim2.new(0, 36, 0, 18)
+            track.Position      = UDim2.new(1, -42, 0.5, -9)
+            track.BackgroundColor3 = val
+                and Color3.fromRGB(0, 200, 100)
+                or  Color3.fromRGB(80, 80, 80)
+            track.Text          = ""
+            corner(track, UDim.new(1, 0))
+
+            local knob = Instance.new("Frame", track)
+            knob.Size           = UDim2.new(0, 14, 0, 14)
+            knob.Position       = val
+                and UDim2.new(1, -16, 0.5, -7)
+                or  UDim2.new(0, 2, 0.5, -7)
+            knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            corner(knob, UDim.new(1, 0))
+
+            local function set(v)
+                val = v
+                tween(track, 0.2, {
+                    BackgroundColor3 = val
+                        and Color3.fromRGB(0, 200, 100)
+                        or  Color3.fromRGB(80, 80, 80)
+                })
+                tween(knob, 0.2, {
+                    Position = val
+                        and UDim2.new(1, -16, 0.5, -7)
+                        or  UDim2.new(0, 2, 0.5, -7)
+                })
+                if tCfg.Callback then pcall(tCfg.Callback, val) end
+                if tCfg.Flag then SkiddyLIB.Flags[tCfg.Flag] = {Value = val} end
+            end
+
+            track.MouseButton1Click:Connect(function() set(not val) end)
+
+            if tCfg.Flag then SkiddyLIB.Flags[tCfg.Flag] = {Value = val} end
+            local obj = {}
+            function obj:Set(v) set(v) end
+            return obj
+        end
+
+        -- ── AddSlider ─────────────────────────────────────────────────────
+        -- tbl8.L equivalent
+        function Tab:AddSlider(sCfg)
+            sCfg = sCfg or {}
+            local minV  = sCfg.Min       or 0
+            local maxV  = sCfg.Max       or 100
+            local inc   = sCfg.Increment or 1
+            local val   = sCfg.Default   or minV
+            local vname = sCfg.ValueName or ""
+            local f     = baseFrame(36)
+
+            local info = Instance.new("TextLabel", f)
+            info.Size           = UDim2.new(1, -16, 0, 16)
+            info.Position       = UDim2.new(0, 8, 0, 2)
+            info.BackgroundTransparency = 1
+            info.TextColor3     = Color3.fromRGB(255, 255, 255)
+            info.TextSize       = 9
+            info.Font           = Enum.Font.Montserrat
+            info.TextXAlignment = Enum.TextXAlignment.Left
+
+            local function fmtText(v)
+                return (sCfg.Name or "Slider") .. ": " .. tostring(v)
+                    .. (vname ~= "" and (" " .. vname) or "")
+            end
+            info.Text = fmtText(val)
+
+            local track = Instance.new("TextButton", f)
+            track.Size          = UDim2.new(1, -16, 0, 6)
+            track.Position      = UDim2.new(0, 8, 0, 22)
+            track.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            track.Text          = ""
+            corner(track, UDim.new(1, 0))
+
+            local fill = Instance.new("Frame", track)
+            fill.Size           = UDim2.new((val - minV) / (maxV - minV), 0, 1, 0)
+            fill.BackgroundColor3 = sCfg.Color or Color3.fromRGB(255, 255, 255)
+            corner(fill, UDim.new(1, 0))
+
+            local dragging = false
+
+            local function update(input)
+                local pct = math.clamp(
+                    (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X,
+                    0, 1)
+                local raw = minV + (maxV - minV) * pct
+                val = math.floor(raw / inc + 0.5) * inc
+                val = math.clamp(val, minV, maxV)
+                fill.Size = UDim2.new((val - minV) / (maxV - minV), 0, 1, 0)
+                info.Text = fmtText(val)
+                if sCfg.Callback then pcall(sCfg.Callback, val) end
+                if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+            end
+
+            track.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    update(inp)
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(inp)
+                if dragging and (
+                    inp.UserInputType == Enum.UserInputType.MouseMovement
+                or  inp.UserInputType == Enum.UserInputType.Touch) then
+                    update(inp)
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+
+            if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+            local obj = {}
+            function obj:Set(v)
+                val = math.clamp(v, minV, maxV)
+                fill.Size = UDim2.new((val - minV) / (maxV - minV), 0, 1, 0)
+                info.Text = fmtText(val)
+                if sCfg.Callback then pcall(sCfg.Callback, val) end
+                if sCfg.Flag then SkiddyLIB.Flags[sCfg.Flag] = {Value = val} end
+            end
+            return obj
+        end
+
+        -- ── AddTextbox ────────────────────────────────────────────────────
+        -- tbl8.I equivalent
+        function Tab:AddTextbox(txCfg)
+            txCfg = txCfg or {}
+            local f = baseFrame(36)
+
+            local lbl = Instance.new("TextLabel", f)
+            lbl.Size            = UDim2.new(1, -16, 0, 16)
+            lbl.Position        = UDim2.new(0, 8, 0, 2)
+            lbl.BackgroundTransparency = 1
+            lbl.Text            = txCfg.Name or "Textbox"
+            lbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize        = 9
+            lbl.Font            = Enum.Font.Montserrat
+            lbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+            local box = Instance.new("TextBox", f)
+            box.Size             = UDim2.new(1, -16, 0, 20)
+            box.Position         = UDim2.new(0, 8, 0, 14)
+            box.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            box.BackgroundTransparency = 0.5
+            box.PlaceholderText  = txCfg.Default or ""
+            box.Text             = ""
+            box.TextColor3       = Color3.fromRGB(255, 255, 255)
+            box.PlaceholderColor3= Color3.fromRGB(150, 150, 150)
+            box.TextSize         = 10
+            box.Font             = Enum.Font.Montserrat
+            box.ClearTextOnFocus = false
+            corner(box, UDim.new(0, 4))
+
+            box.FocusLost:Connect(function()
+                if txCfg.Callback then pcall(txCfg.Callback, box.Text) end
+                if txCfg.TextDisappear then box.Text = "" end
+            end)
+
+            local obj = {}
+            function obj:Set(v) box.Text = tostring(v or "") end
+            function obj:Get() return box.Text end
+            return obj
+        end
+
+        -- ── AddDropdown ───────────────────────────────────────────────────
+        -- tbl8.D equivalent — includes SetOptions + Refresh
+        function Tab:AddDropdown(dCfg)
+            dCfg = dCfg or {}
+            local opts = dCfg.Options or {}
+            local val  = dCfg.Default or (opts[1] or "")
+            local open = false
+
+            -- wrapper grows when open
+            local wrapper = Instance.new("Frame", page)
+            wrapper.Name              = rnd()
+            wrapper.Size              = UDim2.new(1, -6, 0, 28)
+            wrapper.BackgroundTransparency = 1
+            wrapper.LayoutOrder       = nextOrder()
+
+            local mainBtn = Instance.new("TextButton", wrapper)
+            mainBtn.Size              = UDim2.new(1, 0, 0, 28)
+            mainBtn.BackgroundColor3  = Color3.fromRGB(255, 255, 255)
+            mainBtn.BackgroundTransparency = 0.9
+            mainBtn.Text              = ""
+            corner(mainBtn, UDim.new(0, 6))
+            stroke(mainBtn, Color3.fromRGB(255, 255, 255), 0.5, 0.85)
+
+            local lblD = Instance.new("TextLabel", mainBtn)
+            lblD.Size               = UDim2.new(1, -30, 1, 0)
+            lblD.Position           = UDim2.new(0, 8, 0, 0)
+            lblD.BackgroundTransparency = 1
+            lblD.Text               = (dCfg.Name or "Dropdown") .. ": " .. tostring(val)
+            lblD.TextColor3         = Color3.fromRGB(255, 255, 255)
+            lblD.TextSize           = 10
+            lblD.Font               = Enum.Font.Montserrat
+            lblD.TextXAlignment     = Enum.TextXAlignment.Left
+
+            local arrow = Instance.new("TextLabel", mainBtn)
+            arrow.Size              = UDim2.new(0, 20, 1, 0)
+            arrow.Position          = UDim2.new(1, -25, 0, 0)
+            arrow.BackgroundTransparency = 1
+            arrow.Text              = "▼"
+            arrow.TextColor3        = Color3.fromRGB(255, 255, 255)
+            arrow.TextSize          = 10
+            arrow.Font              = Enum.Font.Montserrat
+
+            local listFrame = Instance.new("Frame", wrapper)
+            listFrame.Size          = UDim2.new(1, 0, 0, 120)
+            listFrame.Position      = UDim2.new(0, 0, 0, 30)
+            listFrame.BackgroundTransparency = 1
+            listFrame.Visible       = false
+
+            local scroll = Instance.new("ScrollingFrame", listFrame)
+            scroll.Size             = UDim2.new(1, 0, 1, 0)
+            scroll.BackgroundTransparency = 1
+            scroll.BorderSizePixel  = 0
+            scroll.ScrollBarThickness = 2
+            scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            scroll.CanvasSize       = UDim2.new(0, 0, 0, 0)
+            local scrollList = listLayout(scroll)
+            scrollList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+            scrollList.Padding = UDim.new(0, 2)
+
+            local function setVal(v)
+                val = v
+                lblD.Text = (dCfg.Name or "Dropdown") .. ": " .. tostring(val)
+                if dCfg.Callback then pcall(dCfg.Callback, val) end
+                if dCfg.Flag then SkiddyLIB.Flags[dCfg.Flag] = {Value = val} end
+            end
+
+            local function buildList()
+                for _, c in ipairs(scroll:GetChildren()) do
+                    if c:IsA("TextButton") then c:Destroy() end
+                end
+                for i, opt in ipairs(opts) do
+                    local ob = Instance.new("TextButton", scroll)
+                    ob.LayoutOrder = i
+                    ob.Size        = UDim2.new(1, -4, 0, 22)
+                    ob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                    ob.BackgroundTransparency = 0.92
+                    ob.Text        = tostring(opt)
+                    ob.TextColor3  = Color3.fromRGB(255, 255, 255)
+                    ob.TextSize    = 9
+                    ob.Font        = Enum.Font.Montserrat
+                    corner(ob, UDim.new(0, 4))
+                    ob.MouseButton1Click:Connect(function()
+                        setVal(opt)
+                        open = false
+                        listFrame.Visible = false
+                        arrow.Text        = "▼"
+                        wrapper.Size      = UDim2.new(1, -6, 0, 28)
+                    end)
+                end
+            end
+
+            mainBtn.MouseButton1Click:Connect(function()
+                if not open then buildList() end
+                open = not open
+                listFrame.Visible = open
+                arrow.Text        = open and "▲" or "▼"
+                wrapper.Size      = UDim2.new(1, -6, 0, open and 152 or 28)
+            end)
+
+            if dCfg.Flag then SkiddyLIB.Flags[dCfg.Flag] = {Value = val} end
+
+            local obj = {}
+
+            -- Orion compat
+            function obj:Set(v) setVal(v) end
+
+            -- Orion compat — Refresh(list, clearExisting)
+            function obj:Refresh(list, clear)
+                if clear then
+                    opts = list
+                else
+                    for _, v2 in ipairs(list) do
+                        table.insert(opts, v2)
+                    end
+                end
+                -- keep val if still valid
+                local found = false
+                for _, v2 in ipairs(opts) do
+                    if v2 == val then found = true break end
+                end
+                if not found then
+                    val = opts[1] or ""
+                    lblD.Text = (dCfg.Name or "Dropdown") .. ": " .. tostring(val)
+                end
+                if open then buildList() end
+            end
+
+            -- Skiddy compat — SetOptions(list)  (alias for Refresh(list, true))
+            function obj:SetOptions(list)
+                obj:Refresh(list, true)
+            end
+
+            return obj
+        end
+
+        -- ── AddLabel ──────────────────────────────────────────────────────
+
+        function Tab:AddLabel(text)
+            local f = Instance.new("TextLabel", page)
+            f.Name               = rnd()
+            f.Size               = UDim2.new(1, -6, 0, 24)
+            f.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
+            f.BackgroundTransparency = 0.85
+            f.Text               = text or ""
+            f.TextColor3         = Color3.fromRGB(255, 255, 255)
+            f.TextSize           = 10
+            f.Font               = Enum.Font.Montserrat
+            f.TextXAlignment     = Enum.TextXAlignment.Left
+            f.LayoutOrder        = nextOrder()
+            corner(f, UDim.new(0, 6))
+            uiPadding(f, 0, 0, 8, 0)
+            local obj = {}
+            function obj:Set(t) f.Text = t or "" end
+            return obj
+        end
+
+        -- ── AddParagraph ──────────────────────────────────────────────────
+
+        function Tab:AddParagraph(title, body)
+            local f = Instance.new("Frame", page)
+            f.Name               = rnd()
+            f.Size               = UDim2.new(1, -6, 0, 46)
+            f.BackgroundColor3   = Color3.fromRGB(255, 255, 255)
+            f.BackgroundTransparency = 0.9
+            f.LayoutOrder        = nextOrder()
+            corner(f, UDim.new(0, 6))
+
+            local t1 = Instance.new("TextLabel", f)
+            t1.Size              = UDim2.new(1, -16, 0, 18)
+            t1.Position          = UDim2.new(0, 8, 0, 4)
+            t1.BackgroundTransparency = 1
+            t1.Text              = title or ""
+            t1.TextColor3        = Color3.fromRGB(255, 255, 255)
+            t1.TextSize          = 10
+            t1.Font              = Enum.Font.MontserratBold
+            t1.TextXAlignment    = Enum.TextXAlignment.Left
+
+            local t2 = Instance.new("TextLabel", f)
+            t2.Size              = UDim2.new(1, -16, 0, 20)
+            t2.Position          = UDim2.new(0, 8, 0, 22)
+            t2.BackgroundTransparency = 1
+            t2.Text              = body or ""
+            t2.TextColor3        = Color3.fromRGB(200, 200, 200)
+            t2.TextSize          = 9
+            t2.Font              = Enum.Font.Montserrat
+            t2.TextXAlignment    = Enum.TextXAlignment.Left
+            t2.TextWrapped       = true
+
+            local obj = {}
+            function obj:Set(nt, nb)
+                if nt then t1.Text = nt end
+                if nb then t2.Text = nb end
+            end
+            return obj
+        end
+
+        -- ── AddKeybind ────────────────────────────────────────────────────
+        -- Orion AddBind equivalent
+
+        function Tab:AddBind(bCfg)
+            bCfg = bCfg or {}
+            local key      = bCfg.Default or Enum.KeyCode.Unknown
+            local hold     = bCfg.Hold    or false
+            local held     = false
+            local listening= false
+            local f = baseFrame(28)
+
+            local lbl = Instance.new("TextLabel", f)
+            lbl.Size            = UDim2.new(0, 200, 1, 0)
+            lbl.Position        = UDim2.new(0, 8, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text            = bCfg.Name or "Keybind"
+            lbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize        = 10
+            lbl.Font            = Enum.Font.Montserrat
+            lbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+            local keyBtn = Instance.new("TextButton", f)
+            keyBtn.Size         = UDim2.new(0, 70, 0, 20)
+            keyBtn.Position     = UDim2.new(1, -76, 0.5, -10)
+            keyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            keyBtn.BackgroundTransparency = 0.5
+            keyBtn.TextColor3   = Color3.fromRGB(255, 255, 255)
+            keyBtn.TextSize     = 9
+            keyBtn.Font         = Enum.Font.Montserrat
+            keyBtn.Text         = key.Name or "NONE"
+            corner(keyBtn, UDim.new(0, 4))
+
+            keyBtn.MouseButton1Click:Connect(function()
+                listening = true
+                keyBtn.Text = "..."
+            end)
+
+            UserInputService.InputBegan:Connect(function(inp, gp)
+                if listening then
+                    if inp.UserInputType == Enum.UserInputType.Keyboard then
+                        key = inp.KeyCode
+                        keyBtn.Text = key.Name
+                        listening = false
+                        if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+                    end
+                    return
+                end
+                if gp then return end
+                if inp.KeyCode == key then
+                    if hold then
+                        held = true
+                        if bCfg.Callback then pcall(bCfg.Callback, true) end
+                    else
+                        if bCfg.Callback then pcall(bCfg.Callback) end
+                    end
+                end
+            end)
+
+            UserInputService.InputEnded:Connect(function(inp)
+                if hold and inp.KeyCode == key and held then
+                    held = false
+                    if bCfg.Callback then pcall(bCfg.Callback, false) end
+                end
+            end)
+
+            if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+            local obj = {}
+            function obj:Set(k)
+                key = k
+                keyBtn.Text = k.Name
+                if bCfg.Flag then SkiddyLIB.Flags[bCfg.Flag] = {Value = key} end
+            end
+            return obj
+        end
+
+        -- ── AddColorpicker ────────────────────────────────────────────────
+        -- Orion AddColorpicker equivalent — click to open inline HSV picker
+
+        function Tab:AddColorpicker(cpCfg)
+            cpCfg = cpCfg or {}
+            local color = cpCfg.Default or Color3.fromRGB(255, 255, 255)
+            local open  = false
+            local h, s, v2 = Color3.toHSV(color)
+
+            local wrapper = Instance.new("Frame", page)
+            wrapper.Name              = rnd()
+            wrapper.Size              = UDim2.new(1, -6, 0, 28)
+            wrapper.BackgroundTransparency = 1
+            wrapper.LayoutOrder       = nextOrder()
+
+            local row = Instance.new("Frame", wrapper)
+            row.Size              = UDim2.new(1, 0, 0, 28)
+            row.BackgroundColor3  = Color3.fromRGB(255, 255, 255)
+            row.BackgroundTransparency = 0.9
+            row.Text              = nil
+            corner(row, UDim.new(0, 6))
+
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Size            = UDim2.new(1, -50, 1, 0)
+            lbl.Position        = UDim2.new(0, 8, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text            = cpCfg.Name or "Color"
+            lbl.TextColor3      = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize        = 10
+            lbl.Font            = Enum.Font.Montserrat
+            lbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+            local swatch = Instance.new("TextButton", row)
+            swatch.Size         = UDim2.new(0, 24, 0, 18)
+            swatch.Position     = UDim2.new(1, -30, 0.5, -9)
+            swatch.BackgroundColor3 = color
+            swatch.Text         = ""
+            swatch.BorderSizePixel = 0
+            corner(swatch, UDim.new(0, 4))
+            stroke(swatch, Color3.fromRGB(255, 255, 255), 0.5, 0.7)
+
+            -- picker panel
+            local panel = Instance.new("Frame", wrapper)
+            panel.Size          = UDim2.new(1, 0, 0, 100)
+            panel.Position      = UDim2.new(0, 0, 0, 30)
+            panel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            panel.BackgroundTransparency = 0.1
+            panel.Visible       = false
+            corner(panel, UDim.new(0, 6))
+
+            -- hue bar
+            local hueBar = Instance.new("ImageLabel", panel)
+            hueBar.Size         = UDim2.new(1, -16, 0, 10)
+            hueBar.Position     = UDim2.new(0, 8, 0, 8)
+            hueBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            hueBar.Image        = "rbxassetid://698052001"  -- hue gradient
+            corner(hueBar, UDim.new(0, 4))
+
+            -- saturation/value square
+            local svBox = Instance.new("ImageLabel", panel)
+            svBox.Size          = UDim2.new(1, -16, 0, 60)
+            svBox.Position      = UDim2.new(0, 8, 0, 26)
+            svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+            svBox.Image         = "rbxassetid://2615689005" -- sv overlay
+            corner(svBox, UDim.new(0, 4))
+
+            -- R G B labels
+            local rgbLbl = Instance.new("TextLabel", panel)
+            rgbLbl.Size         = UDim2.new(1, -16, 0, 10)
+            rgbLbl.Position     = UDim2.new(0, 8, 0, 90)
+            rgbLbl.BackgroundTransparency = 1
+            rgbLbl.TextColor3   = Color3.fromRGB(200, 200, 200)
+            rgbLbl.TextSize     = 8
+            rgbLbl.Font         = Enum.Font.Montserrat
+            rgbLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+            local function updateColor()
+                color = Color3.fromHSV(h, s, v2)
+                swatch.BackgroundColor3 = color
+                svBox.BackgroundColor3  = Color3.fromHSV(h, 1, 1)
+                local r = math.floor(color.R * 255)
+                local g = math.floor(color.G * 255)
+                local b = math.floor(color.B * 255)
+                rgbLbl.Text = string.format("R:%d G:%d B:%d", r, g, b)
+                if cpCfg.Callback then pcall(cpCfg.Callback, color) end
+                if cpCfg.Flag then SkiddyLIB.Flags[cpCfg.Flag] = {Value = color} end
+            end
+            updateColor()
+
+            local function inputOnBar(bar, inp, axis)
+                local pct = math.clamp(
+                    (inp.Position[axis] - bar.AbsolutePosition[axis]) / bar.AbsoluteSize[axis],
+                    0, 1)
+                return pct
+            end
+
+            local draggingHue = false
+            local draggingSV  = false
+
+            hueBar.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                    draggingHue = true
+                    h = inputOnBar(hueBar, inp, "X")
+                    updateColor()
+                end
+            end)
+            svBox.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                    draggingSV = true
+                    s  = inputOnBar(svBox, inp, "X")
+                    v2 = 1 - inputOnBar(svBox, inp, "Y")
+                    updateColor()
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(inp)
+                if inp.UserInputType ~= Enum.UserInputType.MouseMovement
+                and inp.UserInputType ~= Enum.UserInputType.Touch then return end
+                if draggingHue then
+                    h = inputOnBar(hueBar, inp, "X")
+                    updateColor()
+                elseif draggingSV then
+                    s  = inputOnBar(svBox, inp, "X")
+                    v2 = 1 - inputOnBar(svBox, inp, "Y")
+                    updateColor()
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                    draggingHue = false
+                    draggingSV  = false
+                end
+            end)
+
+            swatch.MouseButton1Click:Connect(function()
+                open = not open
+                panel.Visible = open
+                wrapper.Size = UDim2.new(1, -6, 0, open and 132 or 28)
+            end)
+
+            if cpCfg.Flag then SkiddyLIB.Flags[cpCfg.Flag] = {Value = color} end
+            local obj = {}
+            function obj:Set(c)
+                color = c
+                h, s, v2 = Color3.toHSV(c)
+                updateColor()
+            end
+            return obj
+        end
+
+        return Tab
+    end -- MakeTab
+
+    return Window
+end -- MakeWindow
+
+-- ── global notify ─────────────────────────────────────────────────────────────
+
+function SkiddyLIB:MakeNotification(nCfg)
+    nCfg = nCfg or {}
+    notify(
+        nCfg.Name  or nCfg.Title   or "SkiddyLIB",
+        nCfg.Content or "",
+        nCfg.Time  or 3
+    )
+end
+
+function SkiddyLIB:Init()   end   -- Orion compat
+function SkiddyLIB:Destroy() self.Flags = {} end
+
+return SkiddyLIB
+
+--[[
+╔═════════════════════════════════════════════════════════════╗
+║  SkiddyLIB — Full API Reference                                ║
+╠═════════════════════════════════════════════════════════════╣
+║                                                             ║
+║  local SkiddyLIB = loadstring(game:HttpGet("RAW_URL"))()       ║
+║                                                             ║
+║  local Win = SkiddyLIB:MakeWindow({                            ║
+║      Name          = "My Hub",                              ║
+║      Icon          = "rbxassetid://...",  -- optional       ║
+║      CloseCallback = function() end,                        ║
+║  })                                                         ║
+║  Win:SetTitle("New Title")                                  ║
+║  Win:SetIcon("rbxassetid://...")                            ║
+║  Win:Toggle()                                               ║
+║  Win:Notify({ Name="Hi", Content="sup", Time=3 })          ║
+║                                                             ║
+║  local Tab = Win:MakeTab({                                  ║
+║      Name = "Main",                                         ║
+║      Icon = "rbxassetid://...",           -- optional       ║
+║  })                                                         ║
+║                                                             ║
+║  Tab:AddSection({ Name = "Movement" })                      ║
+║                                                             ║
+║  Tab:AddButton({ Name="Go", Callback=function() end })      ║
+║                                                             ║
+║  local tog = Tab:AddToggle({                                ║
+║      Name="Fly", Default=false, Flag="fly",                 ║
+║      Callback=function(v) end })                            ║
+║  tog:Set(true)                                              ║
+║                                                             ║
+║  local sl = Tab:AddSlider({                                 ║
+║      Name="Speed", Min=16, Max=500, Default=16,             ║
+║      Increment=1, ValueName="st/s", Flag="spd",             ║
+║      Color=Color3.fromRGB(0,200,255),                       ║
+║      Callback=function(v) end })                            ║
+║  sl:Set(100)                                                ║
+║                                                             ║
+║  local tb = Tab:AddTextbox({                                ║
+║      Name="Name", Default="type...",                        ║
+║      TextDisappear=false, Callback=function(v) end })       ║
+║  tb:Set("hello")  tb:Get()                                  ║
+║                                                             ║
+║  local dd = Tab:AddDropdown({                               ║
+║      Name="Team", Options={"Red","Blue"}, Default="Red",    ║
+║      Flag="team", Callback=function(v) end })               ║
+║  dd:Set("Blue")                                             ║
+║  dd:Refresh({"Green"}, true)   -- true = replace list       ║
+║  dd:SetOptions({"A","B","C"})  -- Skiddy compat (= Refresh)    ║
+║                                                             ║
+║  local lbl = Tab:AddLabel("text")                           ║
+║  lbl:Set("new text")                                        ║
+║                                                             ║
+║  local para = Tab:AddParagraph("Title","Body")              ║
+║  para:Set("New Title","New Body")                           ║
+║                                                             ║
+║  local bind = Tab:AddBind({                                 ║
+║      Name="Jump", Default=Enum.KeyCode.F,                   ║
+║      Hold=false, Flag="jmp",                                ║
+║      Callback=function() end })                             ║
+║  bind:Set(Enum.KeyCode.G)                                   ║
+║                                                             ║
+║  local cp = Tab:AddColorpicker({                            ║
+║      Name="Color", Default=Color3.fromRGB(255,0,0),         ║
+║      Flag="col", Callback=function(c) end })                ║
+║  cp:Set(Color3.fromRGB(0,255,0))                            ║
+║                                                             ║
+║  SkiddyLIB:MakeNotification({Name="Done",Content="ok",Time=3}) ║
+║  print(SkiddyLIB.Flags["fly"].Value)                           ║
+║  SkiddyLIB:Init()   -- required at end                         ║
+║                                                             ║
+╚═════════════════════════════════════════════════════════════╝
+]]
